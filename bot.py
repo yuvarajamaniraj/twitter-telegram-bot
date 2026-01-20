@@ -1,53 +1,64 @@
 import os
 import asyncio
-import snscrape.modules.twitter as sntwitter
+import requests
+import feedparser
 from telegram import Bot
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-TWITTER_USERNAME = "elonmusk"   # 👈 change later if needed
+TWITTER_USERNAME = "elonmusk"
+
+NITTER_INSTANCES = [
+    "https://nitter.net",
+    "https://nitter.it",
+    "https://nitter.privacydev.net",
+    "https://nitter.poast.org",
+]
+
+async def fetch_latest_tweet():
+    for base in NITTER_INSTANCES:
+        url = f"{base}/{TWITTER_USERNAME}/rss"
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code != 200:
+                continue
+
+            feed = feedparser.parse(r.text)
+            if not feed.entries:
+                continue
+
+            return feed.entries[0]
+
+        except Exception:
+            continue
+
+    return None
 
 async def main():
-    # --- sanity check ---
     if not BOT_TOKEN or not CHAT_ID:
         raise RuntimeError("Missing Telegram credentials")
 
     print(f"Fetching latest tweet from @{TWITTER_USERNAME}")
 
-    # --- fetch latest tweet ---
-    scraper = sntwitter.TwitterUserScraper(TWITTER_USERNAME)
-    tweet = next(scraper.get_items(), None)
+    entry = await fetch_latest_tweet()
 
-    if tweet is None:
-        print("No tweets found")
+    if not entry:
+        print("Could not fetch tweet from any Nitter instance")
         return
 
-    # --- extract data ---
-    tweet_id = tweet.id
-    tweet_text = tweet.content
-    tweet_url = tweet.url
-    media_urls = []
+    title = entry.title
+    link = entry.link
 
-    if tweet.media:
-        for media in tweet.media:
-            if hasattr(media, "fullUrl"):
-                media_urls.append(media.fullUrl)
+    print("TITLE:", title)
+    print("LINK:", link)
 
-    # --- print output (for now) ---
-    print("TWEET ID:", tweet_id)
-    print("TWEET URL:", tweet_url)
-    print("TEXT:")
-    print(tweet_text)
+    bot = Bot(token=BOT_TOKEN)
 
-    if media_urls:
-        print("MEDIA:")
-        for m in media_urls:
-            print(m)
-    else:
-        print("NO MEDIA")
-
-    print("DONE")
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=f"🧵 New tweet from @{TWITTER_USERNAME}\n\n{title}\n\n{link}"
+    )
 
 if __name__ == "__main__":
     asyncio.run(main())
